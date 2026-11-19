@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:http/http.dart';
 import 'package:signalr_netcore/ihub_protocol.dart';
 import 'errors.dart';
+import 'log_redaction.dart';
 import 'signalr_http_client.dart';
 import 'utils.dart';
 import 'package:logging/logging.dart';
@@ -69,7 +70,7 @@ class WebSupportingHttpClient extends SignalRHttpClient {
       headers.addMessageHeaders(request.headers);
 
       _logger?.finest(
-          "HTTP send: url '${request.url}', method: '${request.method}' content: '${request.content}' headers: '$headers'");
+          "HTTP send: url '${redactSecrets(request.url)}', method: '${request.method}' content: '${request.content}' headers: '${redactHeaders(headers)}'");
 
       final httpRespFuture = await Future.any(
           [_sendHttpRequest(httpClient, request, uri, headers), abortFuture]);

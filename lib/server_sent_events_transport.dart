@@ -5,6 +5,7 @@ import 'package:sse_channel/sse_channel.dart';
 
 import 'errors.dart';
 import 'itransport.dart';
+import 'log_redaction.dart';
 import 'signalr_http_client.dart';
 import 'utils.dart';
 
@@ -14,6 +15,7 @@ class ServerSentEventsTransport implements ITransport {
   final AccessTokenFactory? _accessTokenFactory;
 
   final Logger? _logger;
+  final SecretRedactor _redactor = SecretRedactor();
   final bool _logMessageContent;
   SseChannel? _sseClient;
   String? _url;
@@ -45,6 +47,7 @@ class ServerSentEventsTransport implements ITransport {
 
     if (_accessTokenFactory != null) {
       final token = await _accessTokenFactory!();
+      _redactor.remember(token);
       if (!isStringEmpty(token)) {
         final encodedToken = Uri.encodeComponent(token);
         url = url! +
@@ -62,7 +65,7 @@ class ServerSentEventsTransport implements ITransport {
     SseChannel client;
     try {
       client = SseChannel.connect(Uri.parse(url!));
-      _logger?.finer('(SSE transport) connected to $url');
+      _logger?.finer('(SSE transport) connected to ${_redactor.redact(url)}');
       opened = true;
       _sseClient = client;
     } catch (e) {
@@ -81,7 +84,8 @@ class ServerSentEventsTransport implements ITransport {
         }
       }
     }, onError: (e) {
-      _logger?.severe('(SSE transport) error when listening to stream: $e');
+      _logger?.severe(
+          '(SSE transport) error when listening to stream: ${_redactor.redact(e)}');
       if (opened) {
         _close(error: e);
       }
@@ -118,7 +122,8 @@ class ServerSentEventsTransport implements ITransport {
       if (onClose != null) {
         Exception ex = (error is Exception)
             ? error
-            : new GeneralError(error?.toString() ?? 'error');
+            : new GeneralError(
+                error == null ? 'error' : _redactor.redact(error));
 
         onClose?.call(error: ex);
       }

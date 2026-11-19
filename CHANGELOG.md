@@ -1,6 +1,7 @@
 
 ## Next
 * Fix invalid type cast in WebSupportingHttpClient
+* Keep access tokens and Authorization credentials out of log output and out of the error text the package composes itself: the token values handed out by the access token factory (also url encoded), the value of `access_token` (query parameter, map or JSON key, plain or url encoded), the credential of an Authorization header in text, and a JWT after Bearer or Basic are replaced by `***`. Exceptions raised by the underlying HTTP and WebSocket clients, including the uncaught error the WebSocket client raises for a refused upgrade, are passed on unchanged so callers keep their types; they may quote the request URL with the token, so applications should redact what they log from them
   
 ## [1.3.9]
 
