@@ -6,12 +6,14 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'errors.dart';
 import 'itransport.dart';
+import 'log_redaction.dart';
 import 'utils.dart';
 
 class WebSocketTransport implements ITransport {
   // Properties
 
   Logger? _logger;
+  final SecretRedactor _redactor = SecretRedactor();
   AccessTokenFactory? _accessTokenFactory;
   bool _logMessageContent;
   WebSocketChannel? _webSocket;
@@ -38,6 +40,7 @@ class WebSocketTransport implements ITransport {
 
     if (_accessTokenFactory != null) {
       final token = await _accessTokenFactory!();
+      _redactor.remember(token);
       if (!isStringEmpty(token)) {
         final encodedToken = Uri.encodeComponent(token);
         url = url! +
@@ -49,11 +52,11 @@ class WebSocketTransport implements ITransport {
     var websocketCompleter = Completer();
     var opened = false;
     url = url!.replaceFirst('http', 'ws');
-    _logger?.finest("WebSocket try connecting to '$url'.");
+    _logger?.finest("WebSocket try connecting to '${_redactor.redact(url)}'.");
     _webSocket = WebSocketChannel.connect(Uri.parse(url));
     opened = true;
     if (!websocketCompleter.isCompleted) websocketCompleter.complete();
-    _logger?.info("WebSocket connected to '$url'.");
+    _logger?.info("WebSocket connected to '${_redactor.redact(url)}'.");
     _webSocketListenSub = _webSocket!.stream.listen(
       // onData
       (Object? message) {
@@ -68,7 +71,7 @@ class WebSocketTransport implements ITransport {
             onReceive!(message);
           } catch (error) {
             _logger?.severe(
-                "(WebSockets transport) error calling onReceive, error: $error");
+                "(WebSockets transport) error calling onReceive, error: ${_redactor.redact(error)}");
             _close();
           }
         }

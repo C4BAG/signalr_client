@@ -10,6 +10,7 @@ import 'http_connection_options.dart';
 import 'iconnection.dart';
 import 'ihub_protocol.dart';
 import 'itransport.dart';
+import 'log_redaction.dart';
 import 'long_polling_transport.dart';
 import 'server_sent_events_transport.dart';
 import 'signalr_http_client.dart';
@@ -204,6 +205,7 @@ class HttpConnection implements IConnection {
   late bool _connectionStarted;
   late SignalRHttpClient _httpClient;
   final Logger? _logger;
+  final SecretRedactor _redactor = SecretRedactor();
   late HttpConnectionOptions _options;
   ITransport? _transport;
   Future<void>? _startInternalPromise;
@@ -295,13 +297,13 @@ class HttpConnection implements IConnection {
   Future<void>? stop({Exception? error}) async {
     if (_connectionState == ConnectionState.Disconnected) {
       _logger?.finer(
-          "Call to HttpConnection.stop($error) ignored because the connection is already in the disconnected state.");
+          "Call to HttpConnection.stop(${_redactor.redact(error)}) ignored because the connection is already in the disconnected state.");
       return Future.value();
     }
 
     if (_connectionState == ConnectionState.Disconnecting) {
       _logger?.finer(
-          "Call to HttpConnection.stop($error) ignored because the connection is already in the disconnecting state.");
+          "Call to HttpConnection.stop(${_redactor.redact(error)}) ignored because the connection is already in the disconnecting state.");
       return _stopPromise;
     }
 
@@ -335,7 +337,8 @@ class HttpConnection implements IConnection {
       try {
         await _transport!.stop();
       } catch (e) {
-        _logger?.severe("HttpConnection.transport.stop() threw error '$e'.");
+        _logger?.severe(
+            "HttpConnection.transport.stop() threw error '${_redactor.redact(e)}'.");
         _stopConnection();
       }
 
@@ -395,6 +398,7 @@ class HttpConnection implements IConnection {
             // Replace the current access token factory with one that uses
             // the returned access token
             final accessToken = negotiateResponse.accessToken;
+            _redactor.remember(accessToken);
             _accessTokenFactory = () => Future<String>.value(accessToken);
           }
 
@@ -430,7 +434,7 @@ class HttpConnection implements IConnection {
       // This is the only case startInternal can exit in neither the connected nor disconnected state because stopConnection()
       // will transition to the disconnected state. start() will wait for the transition using the stopPromise.
     } catch (e) {
-      _logger?.severe("Failed to start the connection: ${e.toString()}");
+      _logger?.severe("Failed to start the connection: ${_redactor.redact(e)}");
       _connectionState = ConnectionState.Disconnected;
       _transport = null;
       return Future.error(e);
@@ -443,11 +447,13 @@ class HttpConnection implements IConnection {
 
     if (_accessTokenFactory != null) {
       final token = await _accessTokenFactory!();
+      _redactor.remember(token);
       headers.setHeaderValue("Authorization", "Bearer $token");
     }
 
     final negotiateUrl = _resolveNegotiateUrl(url);
-    _logger?.finer("Sending negotiation request: $negotiateUrl");
+    _logger?.finer(
+        "Sending negotiation request: ${_redactor.redact(negotiateUrl)}");
     try {
       final SignalRHttpRequest options = SignalRHttpRequest(
           content: "", headers: headers, timeout: _options.requestTimeout);
@@ -474,7 +480,7 @@ class HttpConnection implements IConnection {
       return negotiateResponse;
     } catch (e) {
       _logger?.severe(
-          "Failed to complete negotiation with the server: ${e.toString()}");
+          "Failed to complete negotiation with the server: ${_redactor.redact(e)}");
       return Future.error(e);
     }
   }
@@ -513,7 +519,8 @@ class HttpConnection implements IConnection {
         _transport = _resolveTransport(endpoint,
             requestedTransport as HttpTransportType?, requestedTransferFormat);
       } catch (e) {
-        transportExceptions.add("${endpoint.transport} failed: $e");
+        transportExceptions
+            .add("${endpoint.transport} failed: ${_redactor.redact(e)}");
         continue;
       }
 
@@ -532,9 +539,10 @@ class HttpConnection implements IConnection {
         return;
       } catch (ex) {
         _logger?.severe(
-            "Failed to start the transport '${endpoint.transport}': ${ex.toString()}");
+            "Failed to start the transport '${endpoint.transport}': ${_redactor.redact(ex)}");
         negotiate = null;
-        transportExceptions.add("${endpoint.transport} failed: $ex");
+        transportExceptions
+            .add("${endpoint.transport} failed: ${_redactor.redact(ex)}");
 
         if (_connectionState != ConnectionState.Connecting) {
           const message =
@@ -612,7 +620,7 @@ class HttpConnection implements IConnection {
 
   void _stopConnection({Exception? error}) {
     _logger?.finer(
-        "HttpConnection.stopConnection(${error ?? "Unknown"}) called while in state $_connectionState.");
+        "HttpConnection.stopConnection(${_redactor.redact(error ?? "Unknown")}) called while in state $_connectionState.");
 
     _transport = null;
 
@@ -622,15 +630,15 @@ class HttpConnection implements IConnection {
 
     if (_connectionState == ConnectionState.Disconnected) {
       _logger?.finer(
-          "Call to HttpConnection.stopConnection($error) was ignored because the connection is already in the disconnected state.");
+          "Call to HttpConnection.stopConnection(${_redactor.redact(error)}) was ignored because the connection is already in the disconnected state.");
       return;
     }
 
     if (_connectionState == ConnectionState.Connecting) {
       _logger?.warning(
-          "Call to HttpConnection.stopConnection($error) was ignored because the connection hasn't yet left the in the connecting state.");
+          "Call to HttpConnection.stopConnection(${_redactor.redact(error)}) was ignored because the connection hasn't yet left the in the connecting state.");
       throw GeneralError(
-          "HttpConnection.stopConnection($error) was called while the connection is still in the connecting state.");
+          "HttpConnection.stopConnection(${_redactor.redact(error)}) was called while the connection is still in the connecting state.");
     }
 
     if (_connectionState == ConnectionState.Disconnecting) {
@@ -640,14 +648,16 @@ class HttpConnection implements IConnection {
     }
 
     if (error != null) {
-      _logger?.severe("Connection disconnected with error '$error'.");
+      _logger?.severe(
+          "Connection disconnected with error '${_redactor.redact(error)}'.");
     } else {
       _logger?.info("Connection disconnected.");
     }
 
     if (_sendQueue != null) {
       _sendQueue!.stop()!.catchError((e) {
-        _logger?.severe("TransportSendQueue.stop() threw error '$e'.");
+        _logger?.severe(
+            "TransportSendQueue.stop() threw error '${_redactor.redact(e)}'.");
       });
       _sendQueue = null;
     }
@@ -663,7 +673,8 @@ class HttpConnection implements IConnection {
           onclose!(error: error);
         }
       } catch (e) {
-        _logger?.severe("HttpConnection.onclose($error) threw error '$e'.");
+        _logger?.severe(
+            "HttpConnection.onclose(${_redactor.redact(error)}) threw error '${_redactor.redact(e)}'.");
       }
     }
   }

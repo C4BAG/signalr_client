@@ -9,6 +9,7 @@ import 'handshake_protocol.dart';
 import 'iconnection.dart';
 import 'ihub_protocol.dart';
 import 'iretry_policy.dart';
+import 'log_redaction.dart';
 import 'utils.dart';
 
 const int DEFAULT_TIMEOUT_IN_MS = 30 * 1000;
@@ -211,7 +212,7 @@ class HubConnection {
     } catch (e) {
       _connectionState = HubConnectionState.Disconnected;
       _logger?.finer(
-          "HubConnection failed to start successfully because of error '$e'.");
+          "HubConnection failed to start successfully because of error '${redactSecrets(e)}'.");
       return Future.error(e);
     }
   }
@@ -262,7 +263,7 @@ class HubConnection {
       }
     } catch (e) {
       _logger?.finer(
-          "Hub handshake failed with error '$e' during start(). Stopping HubConnection.");
+          "Hub handshake failed with error '${redactSecrets(e)}' during start(). Stopping HubConnection.");
 
       _cleanupTimeout();
       _cleanupPingTimer();
@@ -296,13 +297,13 @@ class HubConnection {
   Future<void>? _stopInternal({Exception? error}) async {
     if (_connectionState == HubConnectionState.Disconnected) {
       _logger?.finer(
-          "Call to HubConnection.stop($error) ignored because it is already in the disconnected state.");
+          "Call to HubConnection.stop(${redactSecrets(error)}) ignored because it is already in the disconnected state.");
       return Future.value();
     }
 
     if (_connectionState == HubConnectionState.Disconnecting) {
       _logger?.finer(
-          "Call to HttpConnection.stop($error) ignored because the connection is already in the disconnecting state.");
+          "Call to HttpConnection.stop(${redactSecrets(error)}) ignored because the connection is already in the disconnecting state.");
       return _stopPromise;
     }
 
@@ -625,7 +626,8 @@ class HubConnection {
     try {
       handshakeResult = _handshakeProtocol.parseHandshakeResponse(data);
     } catch (e) {
-      final message = "Error parsing handshake response: '${e.toString()}'.";
+      final message =
+          "Error parsing handshake response: '${redactSecrets(e)}'.";
       _logger?.severe(message);
 
       final error = GeneralError(message);
@@ -716,7 +718,7 @@ class HubConnection {
 
   void _connectionClosed({Exception? error}) {
     _logger?.finer(
-        "HubConnection.connectionClosed($error) called while in state $_connectionState.");
+        "HubConnection.connectionClosed(${redactSecrets(error)}) called while in state $_connectionState.");
 
     // Triggering this.handshakeRejecter is insufficient because it could already be resolved without the continuation having run yet.
     _stopDuringStartError = _stopDuringStartError ??
@@ -761,7 +763,7 @@ class HubConnection {
         _closedCallbacks.forEach((c) => c(error: error)); // removed "this"
       } catch (e) {
         _logger?.severe(
-            "An onclose callback called with error '$error' threw error '$e'.");
+            "An onclose callback called with error '${redactSecrets(error)}' threw error '${redactSecrets(e)}'.");
       }
     }
   }
@@ -786,7 +788,8 @@ class HubConnection {
     _connectionState = HubConnectionState.Reconnecting;
 
     if (error != null) {
-      _logger?.info("Connection reconnecting because of error '$error'.");
+      _logger?.info(
+          "Connection reconnecting because of error '${redactSecrets(error)}'.");
     } else {
       _logger?.info("Connection reconnecting.");
     }
@@ -795,7 +798,7 @@ class HubConnection {
       _reconnectingCallbacks.forEach((c) => c(error: error));
     } catch (e) {
       _logger?.severe(
-          "An onreconnecting callback called with error '$error' threw error '$e'.");
+          "An onreconnecting callback called with error '${redactSecrets(error)}' threw error '${redactSecrets(e)}'.");
     }
 
     // Exit early if an onreconnecting callback called connection.stop().
@@ -828,12 +831,13 @@ class HubConnection {
               .forEach((c) => c(connectionId: _connection.connectionId));
         } catch (e) {
           _logger?.severe(
-              "An onreconnected callback called with connectionId '${_connection.connectionId}; threw error '$e'.");
+              "An onreconnected callback called with connectionId '${_connection.connectionId}; threw error '${redactSecrets(e)}'.");
         }
 
         return;
       } catch (e) {
-        _logger?.info("Reconnect attempt failed because of error '$e'.");
+        _logger?.info(
+            "Reconnect attempt failed because of error '${redactSecrets(e)}'.");
 
         if (_connectionState != HubConnectionState.Reconnecting) {
           _logger?.finer(
@@ -841,7 +845,7 @@ class HubConnection {
           return;
         }
 
-        retryError = Exception(e);
+        retryError = Exception(redactSecrets(e));
         nextRetryDelay = _getNextRetryDelay(
             previousReconnectAttempts++,
             DateTime.now().difference(reconnectStartTime).inMilliseconds,
@@ -862,7 +866,7 @@ class HubConnection {
           RetryContext(elapsedMilliseconds, previousRetryCount, retryReason));
     } catch (e) {
       _logger?.severe(
-          "IRetryPolicy.nextRetryDelayInMilliseconds($previousRetryCount, $elapsedMilliseconds) threw error '$e'.");
+          "IRetryPolicy.nextRetryDelayInMilliseconds($previousRetryCount, $elapsedMilliseconds) threw error '${redactSecrets(e)}'.");
       return null;
     }
   }

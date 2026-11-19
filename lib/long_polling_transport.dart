@@ -6,6 +6,7 @@ import 'abort_controller.dart';
 import 'errors.dart';
 import 'ihub_protocol.dart';
 import 'itransport.dart';
+import 'log_redaction.dart';
 import 'signalr_http_client.dart';
 import 'utils.dart';
 
@@ -14,6 +15,7 @@ class LongPollingTransport implements ITransport {
   final SignalRHttpClient _httpClient;
   final AccessTokenFactory? _accessTokenFactory;
   final Logger? _logger;
+  final SecretRedactor _redactor = SecretRedactor();
   final bool _logMessageContent;
   final AbortController _pollAbort;
 
@@ -69,7 +71,8 @@ class LongPollingTransport implements ITransport {
     // Make initial long polling request
     // Server uses first long polling request to finish initializing connection and it returns without data
     final pollUrl = "$_url&_=${DateTime.now()}";
-    _logger?.finest("(LongPolling transport) polling: $pollUrl");
+    _logger?.finest(
+        "(LongPolling transport) polling: ${_redactor.redact(pollUrl)}");
     final response = await _httpClient.get(pollUrl, options: pollOptions);
     if (response.statusCode != 200) {
       _logger?.severe(
@@ -94,7 +97,8 @@ class LongPollingTransport implements ITransport {
 
         try {
           final pollUrl = "$url&_=${DateTime.now()}";
-          _logger?.finest("(LongPolling transport) polling: $pollUrl");
+          _logger?.finest(
+              "(LongPolling transport) polling: ${_redactor.redact(pollUrl)}");
           final response = await _httpClient.get(pollUrl, options: pollOptions);
 
           if (response.statusCode == 204) {
@@ -127,7 +131,7 @@ class LongPollingTransport implements ITransport {
           if (!_running) {
             // Log but disregard errors that occur after stopping
             _logger?.finest(
-                "(LongPolling transport) Poll errored after shutdown: ${e.toString()}");
+                "(LongPolling transport) Poll errored after shutdown: ${_redactor.redact(e)}");
           } else {
             if (e is TimeoutError) {
               // Ignore timeouts and reissue the poll.
@@ -135,7 +139,7 @@ class LongPollingTransport implements ITransport {
                   "(LongPolling transport) Poll timed out, reissuing.");
             } else {
               // Close the connection with the error as the result.
-              _closeError = Exception(e.toString());
+              _closeError = Exception(_redactor.redact(e));
               _running = false;
             }
           }
@@ -174,8 +178,8 @@ class LongPollingTransport implements ITransport {
       await _receiving;
 
       // Send DELETE to clean up long polling on the server
-      _logger
-          ?.finest("(LongPolling transport) sending DELETE request to $_url.");
+      _logger?.finest(
+          "(LongPolling transport) sending DELETE request to ${_redactor.redact(_url)}.");
 
       final deleteOptions = SignalRHttpRequest();
       final token = await _getAccessToken();
@@ -194,7 +198,9 @@ class LongPollingTransport implements ITransport {
 
   Future<String?> _getAccessToken() async {
     if (_accessTokenFactory != null) {
-      return await _accessTokenFactory!();
+      final token = await _accessTokenFactory!();
+      _redactor.remember(token);
+      return token;
     }
     return null;
   }
@@ -215,11 +221,13 @@ class LongPollingTransport implements ITransport {
     if (onClose != null) {
       var logMessage = "(LongPolling transport) Firing onclose event.";
       if (_closeError != null) {
-        logMessage += " Error: $_closeError";
+        logMessage += " Error: ${_redactor.redact(_closeError)}";
       }
       _logger?.finest(logMessage);
       onClose?.call(
-          error: GeneralError(_closeError?.toString() ?? '_closeError'));
+          error: GeneralError(_closeError == null
+              ? '_closeError'
+              : _redactor.redact(_closeError)));
     }
   }
 }
